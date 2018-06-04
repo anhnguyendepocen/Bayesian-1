@@ -1,0 +1,372 @@
+\documentclass{article}
+\usepackage{fullpage}
+\usepackage{tikz}
+\title{Lab 5}
+\author{Peter Brody-Moore and Harry Bendekgey\\ Math 153: Bayesian Statistics}
+\date{April 24, 2018}
+
+\begin{document}
+\maketitle
+
+<<include=FALSE>>=
+knitr::opts_chunk$set(message=FALSE, warning=FALSE, fig.height=5, fig.width=10, fig.align = "center")
+set.seed(47)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(readr)
+library(reshape2)
+library(wesanderson)
+library(data.table)
+library(forcats)
+set.seed(252525)
+options(digits=4)
+@
+
+\section{Normal Data}
+a) We have a hyper-prior on $\mu$, a hyper-prior on $\tau$, a prior on each of the $\theta$s, and then a distribution on each of the $\bar{x}$ values. We want to draw a graph with edges that connect vertices where the behavior of one depends on the other: 
+\\ \\ 
+$\begin{tikzpicture}
+  [scale=.8,auto=left,vertex/.style={circle,fill=blue!20}]
+  \node[vertex] (A) at (6,8) {hyperprior on $\mu$};
+  \node[vertex] (B) at (12,8) {hyperprior on $\tau$};
+  \node[vertex] (C) at (9,5) {normal($\mu,\tau^2$)};
+  \node[vertex] (D) at (6,3) {$\theta_i$};
+  \node[vertex] (E) at (8,3) {$\theta_i$};
+  \node[vertex] (F) at (10,3) {$\theta_i$};
+  \node[vertex] (G) at (12,3) {$\theta_i$};
+  \node[vertex] (H) at (6,1) {prior};
+  \node[vertex] (I) at (8,1) {prior};
+  \node[vertex] (J) at (10,1) {prior};
+  \node[vertex] (K) at (12,1) {prior};
+  \node[vertex] (L) at (5,-2) {$\bar{x_i}$};
+  \node[vertex] (M) at (8,-2) {$\bar{x_i}$};
+  \node[vertex] (N) at (11,-2) {$\bar{x_i}$};
+  \node[vertex] (O) at (14,-2) {$\bar{x_i}$};
+  \draw[->] (A) -- (C) node[midway, above] {};
+  \draw[->] (B) -- (C) node[midway, above] {};
+  \draw[->] (C) -- (D) node[midway, above] {};
+  \draw[->] (C) -- (E) node[midway, above] {};
+  \draw[->] (C) -- (F) node[midway, above] {};
+  \draw[->] (C) -- (G) node[midway, above] {};
+  \draw[->] (D) -- (H) node[midway, above] {};
+  \draw[->] (E) -- (I) node[midway, above] {};
+  \draw[->] (F) -- (J) node[midway, above] {};
+  \draw[->] (G) -- (K) node[midway, above] {};
+  \draw[->] (H) -- (L) node[midway, above] {};
+  \draw[->] (I) -- (M) node[midway, above] {};
+  \draw[->] (J) -- (N) node[midway, above] {};
+  \draw[->] (K) -- (O) node[midway, above] {};
+
+\end{tikzpicture}$
+\\ \\
+b) This graph depends on so many parameters that we won't recognize the posterior distribution. However, say we take $\theta$ as given. Then, the distribution of the xbars is independent of the other parameters, so we can sample from the conditional. Therefore, a Gibbs Sampler implementation is appealing because if we pretend we know everything else and sample from the conditionals, then it's much simpler to take draws from the posterior.
+<<include=FALSE>>=
+schools <- read_csv('schools.csv')
+J <- nrow (schools)
+y <- schools$estimate
+sigma.y <- schools$sd
+data <- list ("J", "y", "sigma.y") 
+inits <- function()
+
+list (theta=rnorm(J,0,100), mu.theta=rnorm(1,0,100), sigma.theta=runif(1,0,100))
+parameters <- c("theta", "mu.theta", "sigma.theta")
+theta.update <- function (){
+  theta.hat <- (mu/tau^2 + y/sigma.y^2)/(1/tau^2 + 1/sigma.y^2)
+  V.theta <- 1/(1/tau^2 + 1/sigma.y^2)
+  rnorm(J, theta.hat, sqrt(V.theta))
+}
+mu.update <- function (){
+  rnorm(1, mean(theta), tau/sqrt(J))
+}
+tau.update <- function (){
+  sqrt(sum((theta-mu)^2)/rchisq(1,J-1))
+}
+n.chains <- 5
+n.iter <- 1000
+sims <- array (NA, c(n.iter, n.chains, J+2))
+dimnames(sims) <- list (NULL, NULL, c(paste("theta[", 1:8, "]", sep=""), "mu", "tau"))
+for (m in 1:n.chains){
+  mu <- rnorm(1,mean(y),sd(y))
+  tau <- runif(1,0,sd(y))
+  for (t in 1:n.iter){
+    theta <- theta.update()
+    mu <- mu.update()
+    tau <- tau.update()
+    sims[t,m,] <- c(theta, mu, tau)
+  }
+}
+@
+
+<<>>=
+chainsAverage <- colMeans(colMeans(sims[,1:5,]))
+# Bayesian Estimates
+chainsAverage
+@
+\noindent c) The frequentist estimates would either assume that all the groups are unique or assume that all the groups are estimating the same quantity. If they assume that the groups are different then the frequentists fall into Stein's paradox. Since there are more than 3 paramters being estimated (8 schools), setting $\hat{\theta_i} = y_i$ a.k.a making the estimate the sample mean is an inadmissible estimator because there exists an estimator with a lower expected squared error loss. If you assume all the groups are estimating the same quanitity then the frequentists would use overall mean. This still won't be good because in reality the groups probably aren't estimating the same quantity so grouping them together won't lead to accurate predictions. 
+\\ \\ 
+The bayesian estimate we are producing is likely better than these two because it combines characteristics from both. It takes information from all the schools, but doesn't assume that the $\theta_i$'s are equal for all the schools.
+\\ \\
+Looking at a few specific estimates, the bayesian model generated a prediction of 10.84 for $\theta_1$ and 5.254 for $\theta_3$. Meanwhile, the separate estimate frequentist model would predict 28 for $\theta_1$ and -3 for $\theta_2$, while the pooled estimate frequentist model would predict 8.75 for both $\theta_1$ and $\theta_2$. Although we don't know the true $\theta_i$ values, the bayesian estimates show the desirable property of shrinkage without assuming every school is the same (and thus  using the overall mean as the estimate).
+<<include=FALSE>>=
+set.seed(252525)
+@
+
+<<>>=
+#Simulate Data
+mu <- 5
+tau <- 10
+J <- 8
+thetas <- rnorm(J,mu,tau)
+sds <- c(5,7,10,3,15,12,10,5) # assume we have access to
+xbars <- c()
+for(i in 1:J){
+  xbars[i] <- rnorm(1,thetas[i],sds[i])
+}
+
+
+theta.update <- function (){
+  theta.hat <- (mu/tau^2 + xbars/sds^2)/(1/tau^2 + 1/sds^2)
+  V.theta <- 1/(1/tau^2 + 1/sds^2)
+  rnorm(J, theta.hat, sqrt(V.theta))
+}
+mu.update <- function (){
+  rnorm(1, mean(theta), tau/sqrt(J))
+}
+tau.update <- function (){
+  sqrt(sum((theta-mu)^2)/rchisq(1,J-1))
+}
+n.chains <- 5
+n.iter <- 1000
+sims <- array (NA, c(n.iter, n.chains, J+2))
+dimnames(sims) <- list (NULL, NULL, c(paste("theta[", 1:8, "]", sep=""), "mu", "tau"))
+for (m in 1:n.chains){
+  mu <- rnorm(1,mean(xbars),sd(xbars))
+  tau <- runif(1,0,sd(xbars))
+  for (t in 1:n.iter){
+    theta <- theta.update()
+    mu <- mu.update()
+    tau <- tau.update()
+    sims[t,m,] <- c(theta, mu, tau)
+  }
+}
+
+chainsAverage <- colMeans(colMeans(sims[,1:5,]))
+# Comparisons
+quantile(sort(sims[,1,1]),c(.025, .975)) # Credible Interval
+chainsAverage[1] # Posterior Mean Estimate
+thetas[1] # Actual Value
+
+
+quantile(sort(sims[,1,4]),c(.025, .975)) # Credible Interval
+chainsAverage[4] # Posterior Mean Estimate
+thetas[4] # Actual Value
+@
+\noindent
+d) Here we use hyperiors $\mu$ = 5 and $\tau$ = 8 to generate $\theta_i$'s. Then we use these $\theta_i$'s and inputted standard deviations to generate $\bar{x_i}$'s. Finally, take the $\bar{x_i}$'s and standard deviations as known in our model and use the model to estimate the $\theta_i$'s. We look at the comparison between two of the known $\theta_i$'s, estimated $\theta_i$'s, and credible intervals for the two of estiamtes:
+\\ \\
+$\theta_1$ has a estimated value of 3.73, a credible interval of [-5.61,13.15], and an actual value of -0.719.
+\\
+$\theta_4$ has a estimated value of 11.80, a credible interval of [6.14,17.54], and an actual value of 8.49.
+\\
+Our simultation performs decently well. The estimated values are relatively close to the actual values, and the credible intervals cover the actual values.
+
+\section{Binomial Data}
+\noindent We are 2 weeks into the 2018 MLB season, so hitters have fairly unstable batting averages currently.  Their batting averages at the end of last season were much more stable (based on very large sample sizes).  Let's try to guess their last season batting averages (which we will treat as their ``true'' batting average) based on this year's results.\\ \\
+We will treat these batting averages as outcome of several non-identical but conditionally independent binomial experiments, so we will observe $x_i$ and $n_i$ coming from a Bin($n_i, p_i$) experiment for $i=1,\dots,k$.  We will assume that these $p_i$ all came from a common Beta($\alpha,\beta$) distribution, and our task is to learn the value of these hyper-parameters (rather than just fixing them as we have done early on).\\ \\
+The posterior conditionals for the Gibbs sampler are all easy (standard calculations) except for the conditional on $\alpha$ and $\beta$, the hyper-parameters.  These are not of recognizable form, and the code we will use relies on a Metropolis-Hastings step to generate these as we move through the Gibbs sampler. We simulate:
+<<include=FALSE>>=
+set.seed(4747)
+data <- read_csv("baseballData.csv")
+data <- data[,-1] #delete mike trout
+
+y <- data$Hits
+n <- data$atBats
+J <- length(y)
+
+log.prior <- function(alpha,beta) {
+  {-2.5}*log(alpha + beta)
+}
+
+draw.thetas <- function(alpha,beta) {
+  return(rbeta(J,alpha+y,beta+n-y))
+}
+
+draw.alpha <- function(alpha,beta,theta,prop.sd) {
+  alpha.star <- rnorm(1,alpha,prop.sd)
+  num <- J*(lgamma(alpha.star+beta) - lgamma(alpha.star)) +
+    alpha.star*sum(log(theta)) + log.prior(alpha.star,beta)
+  den <- J*(lgamma(alpha+beta)      - lgamma(alpha)) +
+    alpha     *sum(log(theta)) + log.prior(alpha,beta)
+# print(c(alpha,alpha.star,num,den))
+  acc <- ifelse((log(runif(1))<=num - den)&&(alpha.star>0),1,0)
+  alpha.acc <<- alpha.acc + acc
+  return(ifelse(acc,alpha.star,alpha))
+}
+
+draw.beta <- function(alpha,beta,theta,prop.sd) {
+  beta.star <- rnorm(1,beta,prop.sd)
+  num <- J*(lgamma(alpha+beta.star) - lgamma(beta.star)) +
+    beta.star*sum(log(1-theta)) + log.prior(alpha,beta.star)
+  den <- J*(lgamma(alpha+beta)      - lgamma(beta)) +
+    beta     *sum(log(1-theta)) + log.prior(alpha,beta)
+# print(c(beta,beta.star,num,den))
+  acc <- ifelse((log(runif(1))<=num - den)&&(beta.star>0),1,0)
+  beta.acc <<- beta.acc + acc
+
+  return(ifelse(acc,beta.star,beta))
+}
+@
+
+<<include=FALSE>>=
+
+B <- 5000 #burnout
+M <- 15000 #main
+
+MM <- B + M
+
+alpha <- matrix(NA,MM)
+beta <- alpha
+theta <- matrix(NA,nrow=MM,ncol=J)
+
+# Metropolis tuning parameters
+alpha.prop.sd <-  9
+beta.prop.sd <-   9
+
+# Initial values for the chain
+alpha[1] <- 1
+beta[1] <- 1
+theta[1,] <- draw.thetas(alpha[1],beta[1]) # or theta[1,] <- (y+.5/(n+.5)
+
+# Monitor acceptance frequency
+alpha.acc <- 0
+beta.acc <- 0
+
+# MCMC simulation
+for (m in 2:MM) {
+  alpha[m] <- draw.alpha(alpha[m-1],beta[m-1],theta[m-1,],alpha.prop.sd)
+  beta[m] <- draw.beta(alpha[m],beta[m-1],theta[m-1,],beta.prop.sd)
+  theta[m,] <- draw.thetas(alpha[m],beta[m])
+}
+
+good <- (B+1):MM
+
+alpha.mcmc <- alpha[good]
+beta.mcmc <- beta[good]
+theta.mcmc <- theta[good,]
+@
+
+<<>>=
+par(mfrow=c(2,2))
+plot(alpha.mcmc,type="l")
+plot(beta.mcmc,type="l")
+acf(alpha.mcmc,1000)
+acf(beta.mcmc,1000)
+@
+\noindent 
+This doesn't particularly look like a converging chain. There are a few problems here, mainly with the convergence properties of the Metropolis-Hastings Chain. To examine these problems closer, let's look at the convergence of $\frac{\alpha}{\alpha + \beta}$, which we think of as the ``prior mean'', and the convergence of $\alpha + \beta$, which we think of as the ``prior sample size''. David Robinson also estimated these values using a considerably larger data set, and we've included his estimates for reference.
+<<include=FALSE>>=
+estimate <- c()
+for (i in 1:M) {
+  subset <- alpha.mcmc[1:i]/(alpha.mcmc[1:i] + beta.mcmc[1:i])
+  estimate[i] <- mean(subset)
+}
+df <- data.frame(estimate)
+cutoff <- data.frame(x = c(1, M), y = 78.66/(78.66 + 224.87))
+@
+
+<<>>=
+ggplot(df, aes(x=c(1:M),y=estimate, color="Estimated Mean")) + geom_line() + 
+  geom_line(aes(x=x, y=y,color="David Robinson Mean"), cutoff) + 
+  scale_color_manual(values=wes_palette(n=2, name="Royal1")) + 
+  scale_y_continuous(limits = c(0.2, 0.4)) + labs(x="t")
+@
+
+<<include=FALSE>>=
+estimate <- c()
+for (i in 1:M) {
+  subset <- alpha.mcmc[1:i] + beta.mcmc[1:i]
+  estimate[i] <- mean(subset)
+}
+df <- data.frame(estimate)
+cutoff <- data.frame(x = c(1, M), y = 78.66 + 224.87)
+@
+
+<<>>=
+ggplot(df, aes(x=c(1:M),y=estimate, color="Estimated Prior Sample Size")) + geom_line() + 
+  geom_line(aes(x=x, y=y,color="David Robinson Prior Sample Size"), cutoff) + 
+  scale_color_manual(values=wes_palette(n=2, name="Royal1")) + labs(x="t")
+@
+
+\noindent This gives us some insight into what's going on. The chain employs independent normal random walks for $\alpha$ and $\beta$. As we can see here, though, the chain is pretty confident in its value for the prior mean, which tells us that the high-density area of the joint distribution of $\alpha$ and $\beta$ lives on a diagnoal line. The random walk is having a lot of difficulty navigating that diagonal. Perhaps if we used a random walk that was more condusive to the structure of this posterior, we would see much faster convergence.\\ \\
+Our estimates corroborate David Robinson's estimate for the true mean of batting averages, which we expect. We would not expect our data to have the same confidence level, encoded as prior sample size, as David Robinson, considering he was working on a much larger data set. Considering our estimator doesn't know what its prior sample size should be, it's hard to make a statement about how reasonable David Robinson's estimate is.\\ \\ 
+Now let's see how the Bayesian estimators compare to the two frequentist estimators: the one that assumes all data comes from a single binomial process, and estimate everyone's batting average to be that, or the one that assumes everyone's batting average will remain constant throughout the season.
+
+<<include=FALSE>>=
+freq.same.est = sum(data$Hits)/sum(data$atBats)
+data <- data %>%
+  mutate(bayes.est = colMeans(theta.mcmc)) %>%
+  mutate(freq.unique.SE = (avg17 - (Hits/atBats))^2) %>%
+  mutate(freq.same.SE = (avg17 - freq.same.est)^2) %>%
+  mutate(bayes.SE = (avg17 - bayes.est)^2)
+@
+
+<<>>=
+mean(data$freq.unique.SE)
+mean(data$bayes.SE)
+mean(data$freq.same.SE)
+@
+
+\noindent Interestingly, there is very little difference between the Bayesian estimator and the estimator in which all players are assumed to be the same. I sampled a few players to see how our estimate for their batting averages compare to what they've been hitting so far this season.
+<<include=FALSE>>=
+samples <- theta.mcmc[,1:4]
+estimate <- matrix(, nrow=M, ncol=4)
+t <- c(1:M)
+for (j in 1:4) {
+  for(i in 1:M) {
+    subset <- samples[1:i,j]
+    estimate[i,j] <- mean(subset)
+  }
+}
+
+data <- data %>%
+  mutate(avg18 = Hits/atBats)
+
+df_theta <- data.frame(estimate) %>%
+  melt() %>%
+  mutate(t=rep(c(1:M),4))
+
+df_true <- data.frame(y=rep(data$avg18[1:4],2)) %>%
+  mutate(variable = rep(c("X1","X2","X3","X4"),2)) %>% 
+  mutate(x = c(rep(1,4),rep(M,4)))
+@
+
+<<>>=
+ggplot() + geom_line(data=df_theta, aes(x = t, y = value, group=variable,col=variable)) + 
+  geom_line(data=df_true, aes(x=x, y=y, group=variable, col=variable)) + 
+  scale_color_manual(values=wes_palette(n=4, name="GrandBudapest2")) + 
+  guides(color=FALSE)
+@
+\noindent This tells an interesting story: we are looking at four hitters with wildly different batting averages so far this season, and yet we are estimating almost the exact same batting average for all of them. This explains why we are seeing very little difference between the Bayesian estimator and the all-the-same frequentist estimator: the Bayesian estimator is looking at the data, and doesn't trust any of it. With so few at-bats, our posterior is consistent with all players having the same true batting average, and the variability being explained entirely by random noise. We can visualize this shrinkage by looking at the spread of the estimators compared to the spread of the data, and of last year's batting averages:
+
+<<include=FALSE>>=
+df_est <- data %>%
+  select(avg18, bayes.est, avg17) %>%
+  transpose
+
+rownames(df_est) <- c("avg18", "bayes.est", "avg17")
+
+df_est <- df_est %>% 
+  melt() %>%
+  mutate(x=rep(c("Sample Mean", "Bayesian Estimate", "2017 Batting Average"),43))
+@
+
+<<>>=
+ggplot() + 
+  geom_line(data=df_est, 
+            aes(x=fct_inorder(x, ordered=TRUE), y=value, group=variable, col=variable)) +
+  guides(colour=FALSE) + 
+  theme(axis.title.x=element_blank(), axis.text.x = element_text(size=12))
+@
+
+\end{document}
